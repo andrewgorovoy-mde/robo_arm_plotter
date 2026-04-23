@@ -1,0 +1,128 @@
+{
+  "servo_0": {
+    "angle_convention": "brachiograph_motor_deg",
+    "link_lengths_cm": {
+      "L1": 12.6,
+      "L2": 14.5
+    },
+    "samples": [
+     
+      {
+        "direction": "acw",
+        "angle": -81.3732,
+        "pw": 355,
+        "xy_cm": [
+          2.0,
+          3.0
+        ]
+      },
+      {
+        "id": 10,
+        "direction": "cw",
+        "angle": -79.7237,
+        "pw": 340,
+        "xy_cm": [
+          2.1,
+          2.0
+        ]
+      },
+      {
+        "id": 2,
+        "direction": "acw",
+        "angle": -69.3149,
+        "pw": 330,
+        "xy_cm": [
+          2.6,
+          2.65
+        ]
+      },
+      {
+        "direction": "acw",
+        "angle": -58.7534,
+        "pw": 350,
+        "xy_cm": [
+          3.0,
+          2.0
+        ]
+      },
+      {
+        "id": 9,
+        "direction": "cw",
+        "angle": -55.4893,
+        "pw": 320,
+        "xy_cm": [
+          3.6,
+          3.3
+        ]
+      },
+      {
+        "id": 3,
+        "direction": "acw",
+        "angle": -49.092,
+        "pw": 310,
+        "xy_cm": [
+          4.4,
+          4.2
+        ]
+      },
+      {
+        "id": 8,
+        "direction": "cw",
+        "angle": -39.9333,
+        "pw": 305,
+        "xy_cm": [
+          5.5,
+          4.6
+        ]
+      },
+      {
+        "id": 4,
+        "direction": "acw",
+        "angle": -36.4376,
+        "pw": 295,
+        "xy_cm": [
+          6.15,
+          5.2
+        ]
+      },
+      {
+        "id": 7,
+        "direction": "cw",
+        "angle": -28.6011,
+        "pw": 290,
+        "xy_cm": [
+          7.4,
+          5.6
+        ]
+      },
+      {
+        "id": 5,
+        "direction": "acw",
+        "angle": -26.7823,
+        "pw": 280,
+        "xy_cm": [
+          7.8,
+          5.9
+        ]
+      },
+      {
+        "id": 6,
+        "direction": "acw",
+        "angle": -17.4996,
+        "pw": 265,
+        "xy_cm": [
+          9.6,
+          6.45
+        ]
+      }
+    ]
+  },
+  "servo_1": {
+    "angle_convention": "brachiograph_motor_deg",
+    "link_lengths_cm": {
+      "L1": 12.6,
+      "L2": 14.5
+    },
+    "samples": []
+  }
+}
