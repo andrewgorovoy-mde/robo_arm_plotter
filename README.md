@@ -1,5 +1,5 @@
 # Robo 159 Plotter
-
+izzie
 Two-link servo plotter project with:
 - live hardware control through Arduino + PCA9685
 - a matplotlib simulation mode with the same motion pipeline
