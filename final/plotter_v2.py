@@ -62,12 +62,22 @@ HOME_1 = 90
 # --- PEN CONFIGURATION ---
 # Tune these raw pulse values to match your physical setup!
 PEN_UP_PULSE = 300   
-PEN_DOWN_PULSE = 400 
+PEN_DOWN_PULSE = 360 
 PEN_DELAY = 0.15     # Seconds to wait for the pen to finish moving
 
 # Ramp tuning (PULSE_DELAY = seconds between micro-steps; bigger = slower)
 STEP_DEGREES = 2
 PULSE_DELAY = 0.077
+
+# Stage 1 dynamics mode (time-parameterized trajectory in joint space).
+# This keeps the same waypoints/IK but replaces fixed angular micro-steps
+# with a smooth time law. Lower duration = faster drawing.
+DYN_DT = 0.02
+DYN_VEL_MAX_DEG_S = 70.0
+DYN_ACCEL_MAX_DEG_S2 = 220.0
+MOTION_MODE_STANDARD = "standard"
+MOTION_MODE_DYNAMICS = "dynamics"
+motion_mode = MOTION_MODE_STANDARD
 
 # Shape parameters
 STAR_RADIUS_DEG = 18
@@ -301,6 +311,54 @@ def move_both_smooth(a0s, a1s, a0e, a1e):
     set_servo_angle(SERVO_CH_0, a0e)
     set_servo_angle(SERVO_CH_1, a1e)
 
+
+def _dynamics_segment_duration(delta_deg, v_max_deg_s=DYN_VEL_MAX_DEG_S,
+                               a_max_deg_s2=DYN_ACCEL_MAX_DEG_S2):
+    """Minimum feasible duration for a rest-to-rest move with limits.
+    We use this as a conservative bound, then run a smoothstep time law."""
+    d = abs(float(delta_deg))
+    if d < 1e-9:
+        return DYN_DT
+    t_vel = d / max(1e-6, v_max_deg_s)
+    t_acc = math.sqrt(2.0 * d / max(1e-6, a_max_deg_s2))
+    return max(t_vel, t_acc, DYN_DT)
+
+
+def move_both_dynamics(a0s, a1s, a0e, a1e):
+    """Time-parameterized coordinated move (Stage 1 dynamics mode).
+    Path is still straight in joint space, but timing uses a smooth profile
+    and joint limits for velocity/acceleration."""
+    a0s, a1s = float(clamp_angle(a0s)), float(clamp_angle(a1s))
+    a0e, a1e = float(clamp_angle(a0e)), float(clamp_angle(a1e))
+    d0 = abs(a0e - a0s)
+    d1 = abs(a1e - a1s)
+    if d0 < 0.01 and d1 < 0.01:
+        return
+
+    # Synchronize both joints on the slower axis.
+    duration = max(
+        _dynamics_segment_duration(d0),
+        _dynamics_segment_duration(d1),
+    )
+    steps = max(1, int(math.ceil(duration / DYN_DT)))
+    for i in range(1, steps + 1):
+        u = i / steps
+        # Cubic smoothstep: zero velocity at both ends, lower jerk than linear.
+        s = u * u * (3.0 - 2.0 * u)
+        set_servo_angle(SERVO_CH_0, a0s + (a0e - a0s) * s)
+        set_servo_angle(SERVO_CH_1, a1s + (a1e - a1s) * s)
+        time.sleep(DYN_DT)
+    set_servo_angle(SERVO_CH_0, a0e)
+    set_servo_angle(SERVO_CH_1, a1e)
+
+
+def move_both(a0s, a1s, a0e, a1e):
+    """Motion-mode selector used by goto/drawing primitives."""
+    if motion_mode == MOTION_MODE_DYNAMICS:
+        move_both_dynamics(a0s, a1s, a0e, a1e)
+    else:
+        move_both_smooth(a0s, a1s, a0e, a1e)
+
 # ==========================================================
 # Shapes
 # ==========================================================
@@ -331,7 +389,7 @@ def draw_star(a0, a1):
     ]
     pos = (cx, cy)
     for target in [V[0], V[2], V[4], V[1], V[3], V[0], (cx, cy)]:
-        move_both_smooth(pos[0], pos[1], target[0], target[1])
+        move_both(pos[0], pos[1], target[0], target[1])
         pos = target
     pen_up()
     return cx, cy
@@ -347,7 +405,7 @@ def goto_xy(a0, a1, x, y):
         print(f"  IK error: {e}")
         return a0, a1
     s0c, s1c = clamp_angle(s0), clamp_angle(s1)
-    move_both_smooth(a0, a1, s0c, s1c)
+    move_both(a0, a1, s0c, s1c)
     return s0c, s1c
 
 def trace_box_outline(a0, a1):
@@ -604,9 +662,13 @@ print("\nControls:")
 print("  r       home position")
 print("  x       test step (servo0 +30°, servo1 +20°)")
 print("  s       draw square")
+print("  f       draw square (dynamics mode)")
+print("  v       compare square: standard vs dynamics")
 print("  t       draw star")
 print("  g       goto (x, y) cm")
 print("  i       trace image waypoints (inside drawing box)")
+print("  o       trace image (dynamics mode)")
+print("  p       compare image trace: standard vs dynamics")
 print("  b       trace drawing-box outline (verify workspace)")
 print("  u       pen up (test/tune)")
 print("  d       pen down (test/tune)")
@@ -615,6 +677,7 @@ print("  e       erase the simulated page (sim only)")
 print("  q       quit")
 print(f"\nHome pen: ({HOME_X:.2f}, {HOME_Y:.2f}) cm   L1={L1}  L2={L2}")
 print(f"Hysteresis corrections: servo0={HYSTERESIS[0]}, servo1={HYSTERESIS[1]} pulse counts")
+print(f"Motion mode: {motion_mode}  (dyn vmax={DYN_VEL_MAX_DEG_S:.0f}°/s, amax={DYN_ACCEL_MAX_DEG_S2:.0f}°/s², dt={DYN_DT:.3f}s)")
 
 # ==========================================================
 # Command dispatcher — used by both keyboard and the matplotlib UI
@@ -622,7 +685,7 @@ print(f"Hysteresis corrections: servo0={HYSTERESIS[0]}, servo1={HYSTERESIS[1]} p
 def dispatch_command(cmd):
     """Execute a single command tuple. Returns False if the command was
     'quit' (signalling the caller to break its loop)."""
-    global angle0, angle1
+    global angle0, angle1, motion_mode
     kind = cmd[0]
     args = cmd[1:]
 
@@ -641,8 +704,48 @@ def dispatch_command(cmd):
         move_servo_smooth(SERVO_CH_1, angle1, target1); angle1 = target1
         print(f"Step: servo0={angle0}°, servo1={angle1}°")
     elif kind == "square":
+        prev_mode = motion_mode
+        motion_mode = MOTION_MODE_STANDARD
+        t0 = time.perf_counter()
         angle0, angle1 = draw_square(angle0, angle1)
+        dt = time.perf_counter() - t0
+        motion_mode = prev_mode
+        print(f"Square mode={MOTION_MODE_STANDARD}, elapsed={dt:.2f}s")
         print(f"Square done: servo0={angle0}°, servo1={angle1}°")
+    elif kind == "square_dyn":
+        prev_mode = motion_mode
+        motion_mode = MOTION_MODE_DYNAMICS
+        t0 = time.perf_counter()
+        angle0, angle1 = draw_square(angle0, angle1)
+        dt = time.perf_counter() - t0
+        motion_mode = prev_mode
+        print(f"Square mode={MOTION_MODE_DYNAMICS}, elapsed={dt:.2f}s")
+        print(f"Square done: servo0={angle0}°, servo1={angle1}°")
+    elif kind == "square_compare":
+        print("Running square compare from home: standard then dynamics...")
+        pen_up()
+        move_servo_smooth(SERVO_CH_0, angle0, HOME_0); angle0 = HOME_0
+        move_servo_smooth(SERVO_CH_1, angle1, HOME_1); angle1 = HOME_1
+
+        prev_mode = motion_mode
+
+        motion_mode = MOTION_MODE_STANDARD
+        t0 = time.perf_counter()
+        angle0, angle1 = draw_square(angle0, angle1)
+        t_std = time.perf_counter() - t0
+
+        move_servo_smooth(SERVO_CH_0, angle0, HOME_0); angle0 = HOME_0
+        move_servo_smooth(SERVO_CH_1, angle1, HOME_1); angle1 = HOME_1
+        time.sleep(0.5)
+
+        motion_mode = MOTION_MODE_DYNAMICS
+        t1 = time.perf_counter()
+        angle0, angle1 = draw_square(angle0, angle1)
+        t_dyn = time.perf_counter() - t1
+
+        motion_mode = prev_mode
+        speedup = (t_std / t_dyn) if t_dyn > 1e-9 else float("inf")
+        print(f"Square compare: standard={t_std:.2f}s, dynamics={t_dyn:.2f}s, speedup={speedup:.2f}x")
     elif kind == "star":
         angle0, angle1 = draw_star(angle0, angle1)
         print(f"Star done: servo0={angle0}°, servo1={angle1}°")
@@ -653,8 +756,50 @@ def dispatch_command(cmd):
         print(f"Goto done: servo0={angle0:.2f}°, servo1={angle1:.2f}°")
     elif kind == "trace_image":
         path = args[0] if args else None
+        prev_mode = motion_mode
+        motion_mode = MOTION_MODE_STANDARD
+        t0 = time.perf_counter()
         angle0, angle1 = trace_image(angle0, angle1, image_path=path)
+        dt = time.perf_counter() - t0
+        motion_mode = prev_mode
+        print(f"Image trace mode={MOTION_MODE_STANDARD}, elapsed={dt:.2f}s")
         print(f"Trace done: servo0={angle0:.2f}°, servo1={angle1:.2f}°")
+    elif kind == "trace_image_dyn":
+        path = args[0] if args else None
+        prev_mode = motion_mode
+        motion_mode = MOTION_MODE_DYNAMICS
+        t0 = time.perf_counter()
+        angle0, angle1 = trace_image(angle0, angle1, image_path=path)
+        dt = time.perf_counter() - t0
+        motion_mode = prev_mode
+        print(f"Image trace mode={MOTION_MODE_DYNAMICS}, elapsed={dt:.2f}s")
+        print(f"Trace done: servo0={angle0:.2f}°, servo1={angle1:.2f}°")
+    elif kind == "trace_image_compare":
+        path = args[0] if args else None
+        print("Running image-trace compare from home: standard then dynamics...")
+        pen_up()
+        move_servo_smooth(SERVO_CH_0, angle0, HOME_0); angle0 = HOME_0
+        move_servo_smooth(SERVO_CH_1, angle1, HOME_1); angle1 = HOME_1
+
+        prev_mode = motion_mode
+
+        motion_mode = MOTION_MODE_STANDARD
+        t0 = time.perf_counter()
+        angle0, angle1 = trace_image(angle0, angle1, image_path=path)
+        t_std = time.perf_counter() - t0
+
+        move_servo_smooth(SERVO_CH_0, angle0, HOME_0); angle0 = HOME_0
+        move_servo_smooth(SERVO_CH_1, angle1, HOME_1); angle1 = HOME_1
+        time.sleep(0.5)
+
+        motion_mode = MOTION_MODE_DYNAMICS
+        t1 = time.perf_counter()
+        angle0, angle1 = trace_image(angle0, angle1, image_path=path)
+        t_dyn = time.perf_counter() - t1
+
+        motion_mode = prev_mode
+        speedup = (t_std / t_dyn) if t_dyn > 1e-9 else float("inf")
+        print(f"Image trace compare: standard={t_std:.2f}s, dynamics={t_dyn:.2f}s, speedup={speedup:.2f}x")
     elif kind == "trace_box":
         angle0, angle1 = trace_box_outline(angle0, angle1)
         print(f"Box outline done: servo0={angle0:.2f}°, servo1={angle1:.2f}°")
@@ -690,6 +835,10 @@ def _key_to_command(ch):
         return ("test_step",)
     if ch in ("s", "S"):
         return ("square",)
+    if ch in ("f", "F"):
+        return ("square_dyn",)
+    if ch in ("v", "V"):
+        return ("square_compare",)
     if ch in ("t", "T"):
         return ("star",)
     if ch in ("g", "G"):
@@ -702,6 +851,16 @@ def _key_to_command(ch):
         if path is None:
             return None
         return ("trace_image", path)
+    if ch in ("o", "O"):
+        path = select_image_path()
+        if path is None:
+            return None
+        return ("trace_image_dyn", path)
+    if ch in ("p", "P"):
+        path = select_image_path()
+        if path is None:
+            return None
+        return ("trace_image_compare", path)
     if ch in ("b", "B"):
         return ("trace_box",)
     if ch in ("u", "U"):
