@@ -4,7 +4,7 @@ Two-link servo plotter project with:
 - live hardware control through Arduino + PCA9685
 - a matplotlib simulation mode with the same motion pipeline
 - interactive calibration capture and calibration plotting tools
-- image/SVG to stroke conversion and tracing utilities
+- im  age/SVG to stroke conversion and tracing utilities
 
 The main runtime script is `final/plotter_v2.py`.
 
